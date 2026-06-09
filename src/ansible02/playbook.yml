@@ -1,0 +1,23 @@
+- name: Consul Server
+  hosts: consul_servers
+  become: yes
+  roles:
+    - install_consul_server
+
+- name: Consul Clients
+  hosts: consul_clients
+  become: yes
+  roles:
+    - install_consul_client
+
+- name: Database
+  hosts: databases
+  become: yes
+  roles:
+    - install_db
+
+- name: Hotel Service
+  hosts: api_servers
+  become: yes
+  roles:
+    - install_hotels_service

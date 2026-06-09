@@ -1,0 +1,137 @@
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Install OpenJDK 8
+  apt:
+    name: openjdk-8-jdk
+    state: present
+
+- name: Install Maven
+  apt:
+    name: maven
+    state: present
+
+- name: Create app directory
+  file:
+    path: /opt/hotel-service
+    state: directory
+    owner: vagrant
+    group: vagrant
+
+- name: Copy hotel service source code
+  copy:
+    src: hotel-service/
+    dest: /opt/hotel-service/
+    owner: vagrant
+    group: vagrant
+
+- name: Set environment variables
+  lineinfile:
+    path: /etc/environment
+    line: "{{ item }}"
+  loop:
+    - 'POSTGRES_HOST="127.0.0.1"'
+    - 'POSTGRES_PORT="5432"'
+    - 'POSTGRES_DB="hotels_db"'
+    - 'POSTGRES_USER="postgres"'
+    - 'POSTGRES_PASSWORD="postgres"'
+
+- name: Build hotel service
+  shell: |
+    cd /opt/hotel-service
+    mvn clean package -DskipTests
+  become_user: vagrant
+  environment:
+    JAVA_HOME: /usr/lib/jvm/java-8-openjdk-arm64
+
+- name: Create systemd service for hotel service
+  copy:
+    content: |
+      [Unit]
+      Description=Hotel Service
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=vagrant
+      WorkingDirectory=/opt/hotel-service
+      Environment=POSTGRES_HOST=127.0.0.1
+      Environment=POSTGRES_PORT=5432
+      Environment=POSTGRES_DB=hotels_db
+      Environment=POSTGRES_USER=postgres
+      Environment=POSTGRES_PASSWORD=postgres
+      ExecStart=/usr/bin/java -jar /opt/hotel-service/target/hotel-service-0.0.1-SNAPSHOT.jar
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/hotel-service.service
+    mode: '0644'
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Start and enable hotel service
+  systemd:
+    name: hotel-service
+    state: started
+    enabled: yes
+
+- name: Register hotel service with Consul
+  uri:
+    url: "http://192.168.57.10:8500/v1/agent/service/register"
+    method: PUT
+    body_format: json
+    body:
+      ID: "hotel-service"
+      Name: "hotel-service"
+      Tags: ["api", "hotels"]
+      Address: "192.168.57.11"
+      Port: 8082
+      Check:
+        HTTP: "http://192.168.57.11:8082/api/v1/hotels"
+        Interval: "10s"
+
+- name: Register hotel-service sidecar proxy with Consul
+  uri:
+    url: "http://192.168.57.10:8500/v1/agent/service/register"
+    method: PUT
+    body_format: json
+    body:
+      ID: "hotel-service-sidecar-proxy"
+      Name: "hotel-service-sidecar-proxy"
+      Kind: "connect-proxy"
+      Proxy:
+        DestinationServiceName: "hotel-service"
+        DestinationServiceID: "hotel-service"
+        LocalServiceAddress: "127.0.0.1"
+        LocalServicePort: 8082
+      Address: "192.168.57.11"
+      Port: 21001
+      Check:
+        Name: "hotel-service Sidecar Proxy Health Check"
+        TCP: "192.168.57.11:21001"
+        Interval: "10s"
+        Timeout: "5s"
+
+- name: Create the Envoy sidecar systemd file for hotel-service
+  copy:
+    dest: /etc/systemd/system/consul-envoy.service
+    content: |
+      [Unit]
+      Description=Consul Envoy Sidecar for hotel-service
+      After=consul.service
+      Requires=consul.service
+
+      [Service]
+      ExecStart=/usr/local/bin/consul connect envoy -sidecar-for hotel-service -ignore-envoy-compatibility
+      Restart=on-failure
+      RestartSec=5
+      User=root
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: restart consul-envoy

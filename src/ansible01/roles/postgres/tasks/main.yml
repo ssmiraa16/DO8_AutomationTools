@@ -1,0 +1,55 @@
+- name: Update apt
+  apt:
+    update_cache: yes
+
+- name: Install PostgreSQL
+  apt:
+    name:
+      - acl
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+
+- name: Start and enable PostgreSQL service
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Create database
+  postgresql_db:
+    name: test
+    state: present
+  become_user: postgres
+
+- name: Create database user
+  postgresql_user:
+    name: user
+    login_user: postgres
+    password: password
+    state: present
+  become_user: postgres
+
+- name: Create sample table
+  postgresql_query:
+    db: test
+    query: |
+      CREATE TABLE IF NOT EXISTS data (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+  become_user: postgres
+
+- name: Insert sample data
+  postgresql_query:
+    db: test
+    query: |
+      INSERT INTO data (name, description) VALUES 
+      ('Sample 1', 'First sample record'),
+      ('Sample 2', 'Second sample record'),
+      ('Sample 3', 'Third sample record')
+      ON CONFLICT DO NOTHING;
+  become_user: postgres

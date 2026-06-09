@@ -1,0 +1,110 @@
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Install PostgreSQL
+  apt:
+    name:
+      - acl
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+
+- name: Start and enable PostgreSQL service
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Create hotels_db database
+  postgresql_db:
+    name: hotels_db
+    state: present
+  become_user: postgres
+
+- name: Create database user
+  postgresql_user:
+    name: postgres
+    password: postgres
+    state: present
+  become_user: postgres
+
+- name: Configure PostgreSQL to listen on all addresses
+  lineinfile:
+    path: "/etc/postgresql/14/main/postgresql.conf"
+    regexp: "^#?listen_addresses"
+    line: "listen_addresses = '*'"
+    owner: postgres
+    group: postgres
+  become: true
+  notify: restart postgresql
+
+- name: Configure PostgreSQL authentication
+  blockinfile:
+    path: "/etc/postgresql/14/main/pg_hba.conf"
+    block: |
+      # Trust local connections (both IPv4 and IPv6) from the Consul Envoy sidecar proxy
+      host    all             all             127.0.0.1/32            trust
+      host    all             all             ::1/128                 trust
+    owner: postgres
+    group: postgres
+  become: true
+  notify: restart postgresql
+
+- name: Register PostgreSQL service with Consul
+  uri:
+    url: "http://192.168.57.10:8500/v1/agent/service/register"
+    method: PUT
+    body_format: json
+    body:
+      ID: "postgres"
+      Name: "postgres"
+      Tags: ["database"]
+      Address: "192.168.57.12"
+      Port: 5432
+      Check:
+        TCP: "192.168.57.12:5432"
+        Interval: "10s"
+
+- name: Register PostgreSQL sidecar proxy with Consul
+  uri:
+    url: "http://192.168.57.10:8500/v1/agent/service/register"
+    method: PUT
+    body_format: json
+    body:
+      ID: "postgres-sidecar-proxy"
+      Name: "postgres-sidecar-proxy"
+      Kind: "connect-proxy"
+      Proxy:
+        DestinationServiceName: "postgres"
+        DestinationServiceID: "postgres"
+        LocalServiceAddress: "127.0.0.1"
+        LocalServicePort: 5432
+      Address: "192.168.57.12"
+      Port: 21000
+      Check:
+        Name: "PostgreSQL Sidecar Proxy Health Check"
+        TCP: "192.168.57.12:21000"
+        Interval: "10s"
+        Timeout: "5s"
+        
+- name: Create the Envoy sidecar systemd file for postgres
+  copy:
+    dest: /etc/systemd/system/consul-envoy.service
+    content: |
+      [Unit]
+      Description=Consul Envoy Sidecar for postgres
+      # Dependencies: Wait for both Postgres and the Consul agent to be ready
+      After=postgresql.service consul.service
+      Requires=postgresql.service consul.service
+
+      [Service]
+      ExecStart=/usr/local/bin/consul connect envoy -sidecar-for postgres -ignore-envoy-compatibility
+      Restart=on-failure
+      User=root
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+  notify: restart consul-envoy-db

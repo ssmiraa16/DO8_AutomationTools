@@ -1,0 +1,14 @@
+datacenter = "dc1"
+data_dir = "/opt/consul"
+log_level = "INFO"
+node_name = "{{ ansible_hostname }}"
+server = false
+bind_addr = "{{ ansible_default_ipv4.address }}"
+advertise_addr = "{{ ansible_default_ipv4.address }}"
+retry_join = ["192.168.57.10"]
+connect {
+  enabled = true
+}
+ports {
+  grpc = 8502
+}

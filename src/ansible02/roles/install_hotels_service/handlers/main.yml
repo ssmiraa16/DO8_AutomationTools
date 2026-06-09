@@ -1,0 +1,11 @@
+- name: restart hotel-service
+  service:
+    name: hotel-service
+    state: restarted
+    daemon_reload: yes
+
+- name: restart consul-envoy
+  service:
+    name: consul-envoy
+    state: restarted
+    daemon_reload: yes

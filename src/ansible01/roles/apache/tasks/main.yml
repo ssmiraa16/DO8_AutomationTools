@@ -1,0 +1,19 @@
+- name: Update apt
+  apt:
+    update_cache: yes
+
+- name: Install Apache2
+  apt:
+    name: apache2
+    state: present
+
+- name: Start and enable Apache service
+  systemd:
+    name: apache2
+    state: started
+    enabled: yes
+
+- name: Ensure Apache is running
+  service:
+    name: apache2
+    state: started

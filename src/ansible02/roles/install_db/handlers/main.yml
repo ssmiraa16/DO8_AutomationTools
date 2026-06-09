@@ -1,0 +1,10 @@
+- name: restart postgresql
+  systemd:
+    name: postgresql
+    state: restarted
+- name: restart consul-envoy-db
+  service:
+    name: consul-envoy
+    state: restarted
+    enabled: true
+    daemon_reload: yes
